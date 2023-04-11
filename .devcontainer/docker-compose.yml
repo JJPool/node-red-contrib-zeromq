@@ -1,0 +1,15 @@
+version: '3.7'
+
+services:
+  nodered:
+    build: .
+    environment:
+      - TZ=Europe/Paris
+    volumes:
+      - ../:/workspace
+    networks:
+      - nodered_network
+    command: sleep infinity
+    
+networks:
+  nodered_network:

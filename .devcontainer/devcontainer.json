@@ -1,0 +1,24 @@
+{
+    "name": "Node-RED Dev Container",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "nodered",
+    "workspaceFolder": "/workspace",
+    "customizations": {
+		// Configure properties specific to VS Code.
+		"vscode": {	
+			// Add the IDs of extensions you want installed when the container is created.
+			"extensions": [
+				"ms-azuretools.vscode-docker",
+				"mhutchie.git-graph",
+				"donjayamanne.githistory",
+				"eamodio.gitlens",
+				"GitHub.vscode-pull-request-github",
+				"rangav.vscode-thunder-client",
+				"GitHub.copilot-nightly",
+				"GitHub.copilot-labs",
+                "waderyan.nodejs-extension-pack"
+			]
+		}
+	}
+}
+  
