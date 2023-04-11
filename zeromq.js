@@ -1,7 +1,57 @@
 
 module.exports = function(RED) {
     "use strict";
-    var zmq = require('zeromq');
+    const zmq = require('zeromq');
+
+    async function initZmqInNode(node) {
+        node.sock = new zmq[node.intype === 'sub' ? 'Subscriber' : 'Pull']();
+        node.connected = false;
+    
+        try {
+            if (node.isserver === true) {
+                await node.sock.bind(node.server);
+            } else {
+                node.sock.connect(node.server);
+            }
+            node.status({ fill: "green", shape: "dot", text: "connected" });
+            node.connected = true;
+        } catch (e) {
+            node.status({ fill: "red", shape: "ring", text: e.toString() });
+            node.error(e);
+        }
+    
+        if (node.intype === "sub") {
+            node.sock.subscribe(node.topic);
+        }
+    
+        for await (const msg of node.sock) {
+            let p = {};
+            let parts = [msg];
+    
+            for (let i = 0; i < parts.length; i++) {
+                if (i >= node.fields.length) {
+                    node.fields[i] = "part" + i;
+                }
+                p[node.fields[i]] = parts[i];
+    
+                if (node.output !== "buffer") {
+                    try {
+                        p[node.fields[i]] = p[node.fields[i]].toString();
+                    } catch (e) {
+                        p.error = true;
+                        node.error("Not a string", p);
+                    }
+                }
+    
+                if (node.output === "json") {
+                    try {
+                        p[node.fields[i]] = JSON.parse(p[node.fields[i]]);
+                    } catch (e) {}
+                }
+            }
+            node.send(p);
+        }
+    }
 
     function ZmqInNode(n) {
         RED.nodes.createNode(this, n);
@@ -14,46 +64,8 @@ module.exports = function(RED) {
         if (this.fields[0] === '') { this.fields = ["part0"]; }
         this.output = n.output;
         var node = this;
-        node.connected = false;
 
-        node.sock = zmq.socket(node.intype);
-
-        if (node.isserver === true) {
-            node.sock.bind(node.server, function(e) {
-                if (e) {
-                    node.status({fill:"red",shape:"ring",text:e.toString()});
-                    node.error(e);
-                }
-                else {
-                    node.status({fill:"green",shape:"dot",text:"bound"});
-                    node.connected = true;
-                }
-            });
-        }
-        else {
-            node.sock.connect(node.server);
-            node.status({fill:"green",shape:"dot",text:"connected"});
-            node.connected = true;
-        }
-
-        if (node.intype === "sub") { node.sock.subscribe(node.topic); }
-
-        node.sock.on('message', function() {
-            var p = {};
-            for (var i=0; i < arguments.length; i++) {
-                if (i >= node.fields.length) { node.fields[i] = "part"+i; }
-                p[node.fields[i]] = arguments[i];
-                if (node.output !== "buffer") {
-                    try { p[node.fields[i]] = p[node.fields[i]].toString(); }
-                    catch (e) { p.error = true; node.error("Not a string",p); }
-                }
-                if (node.output === "json") {
-                    try { p[node.fields[i]] = JSON.parse(p[node.fields[i]]); }
-                    catch (e) { }
-                }
-            }
-            node.send(p);
-        });
+        initZmqInNode(node);
 
         node.on("close", function() {
             node.connected = false;
@@ -64,6 +76,24 @@ module.exports = function(RED) {
     RED.nodes.registerType("zeromq in", ZmqInNode);
 
 
+    async function initZmqOutNode(node) {
+        node.sock = new zmq[node.intype === 'pub' ? 'Publisher' : 'Push']();
+        node.connected = false;
+    
+        try {
+            if (node.isserver === true) {
+                await node.sock.bind(node.server);
+            } else {
+                node.sock.connect(node.server);
+            }
+            node.status({ fill: "green", shape: "dot", text: "connected" });
+            node.connected = true;
+        } catch (e) {
+            node.status({ fill: "red", shape: "ring", text: e.toString() });
+            node.error(e);
+        }
+    }
+    
     function ZmqOutNode(n) {
         RED.nodes.createNode(this, n);
         this.server = n.server;
@@ -72,44 +102,25 @@ module.exports = function(RED) {
         this.topic = n.topic;
         this.fields = n.fields.split(",").map(function(f) { return f.trim(); }) || [];
         var node = this;
-        node.sock = zmq.socket(node.intype);
-        node.connected = false;
-
-        if (node.isserver === true) {
-            node.sock.bind(node.server, function(e) {
-                if (e) {
-                    node.status({fill:"red",shape:"ring",text:e.toString()});
-                    node.error(e);
-                }
-                else {
-                    node.status({fill:"green",shape:"dot",text:"bound"});
-                    node.connected = true;
-                }
-            });
-        }
-        else {
-            node.sock.connect(node.server);
-            node.status({fill:"green",shape:"dot",text:"connected"});
-            node.connected = true;
-        }
-
-        node.on("input", function(msg) {
+    
+        initZmqOutNode(node);
+    
+        node.on("input", async function(msg) {
             if (node.connected) {
                 msg.topic = node.topic || msg.topic;
                 if (typeof msg.payload === "object" && !Buffer.isBuffer(msg.payload)) {
                     msg.payload = JSON.stringify(msg.payload);
                 }
                 var m = [];
-                for (var i=0; i<node.fields.length; i++) {
+                for (var i = 0; i < node.fields.length; i++) {
                     m.push(msg[node.fields[i]]);
                 }
-                node.sock.send(m);
-            }
-            else {
-                node.error("Not connected: "+node.server,msg);
+                await node.sock.send(m);
+            } else {
+                node.error("Not connected: " + node.server, msg);
             }
         });
-
+    
         node.on("close", function() {
             node.connected = false;
             node.sock.close();
@@ -118,7 +129,23 @@ module.exports = function(RED) {
     }
     RED.nodes.registerType("zeromq out", ZmqOutNode);
 
-
+    async function initZmqInOutNode(node) {
+        node.sock = new zmq[node.intype === 'pair' ? 'Pair' : 'Pair']();
+        node.connected = false;
+    
+        try {
+            if (node.isserver === true) {
+                await node.sock.bind(node.server);
+            } else {
+                node.sock.connect(node.server);
+            }
+            node.status({ fill: "green", shape: "dot", text: "connected" });
+            node.connected = true;
+        } catch (e) {
+            node.status({ fill: "red", shape: "ring", text: e.toString() });
+            node.error(e);
+        }
+    }
     function ZmqInOutNode(n) {
         RED.nodes.createNode(this, n);
         this.server = n.server;
@@ -128,66 +155,58 @@ module.exports = function(RED) {
         this.fields = n.fields.split(",").map(function(f) { return f.trim(); }) || [];
         this.output = n.output;
         var node = this;
-        node.sock = zmq.socket(node.intype);
-        node.connected = false;
-
-        if (node.isserver === true) {
-            node.sock.bind(node.server, function(e) {
-                if (e) {
-                    node.status({fill:"red",shape:"ring",text:e.toString()});
-                    node.error(e);
-                }
-                else {
-                    node.status({fill:"green",shape:"dot",text:"bound"});
-                    node.connected = true;
-                }
-            });
-        }
-        else {
-            node.sock.connect(node.server);
-            node.status({fill:"green",shape:"dot",text:"connected"});
-            node.connected = true;
-        }
-
-        node.on("input", function(msg) {
+    
+        initZmqInOutNode(node);
+    
+        node.on("input", async function(msg) {
             if (node.connected) {
                 msg.topic = node.topic || msg.topic;
                 if (typeof msg.payload === "object" && !Buffer.isBuffer(msg.payload)) {
                     msg.payload = JSON.stringify(msg.payload);
                 }
                 var m = [];
-                for (var i=0; i<node.fields.length; i++) {
+                for (var i = 0; i < node.fields.length; i++) {
                     m.push(msg[node.fields[i]]);
                 }
-                node.sock.send(m);
-            }
-            else {
-                node.error("Not connected: "+node.server,msg);
+                await node.sock.send(m);
+            } else {
+                node.error("Not connected: " + node.server, msg);
             }
         });
-
-        node.sock.on('message', function() {
-            var p = {};
-            for (var i=0; i < arguments.length; i++) {
-                if (i >= node.fields.length) { node.fields[i] = "part"+i; }
-                p[node.fields[i]] = arguments[i];
-                if (node.output !== "buffer") {
-                    try { p[node.fields[i]] = arguments[i].toString(); }
-                    catch (e) { p.error = true; node.error("Not a string",p); }
+    
+        (async () => {
+            for await (const message of node.sock) {
+                var p = {};
+                for (var i = 0; i < message.length; i++) {
+                    if (i >= node.fields.length) { node.fields[i] = "part" + i; }
+                    p[node.fields[i]] = message[i];
+                    if (node.output !== "buffer") {
+                        try {
+                            p[node.fields[i]] = message[i].toString();
+                        } catch (e) {
+                            p.error = true;
+                            node.error("Not a string", p);
+                        }
+                    }
+                    if (node.output === "json") {
+                        try {
+                            p[node.fields[i]] = JSON.parse(p[node.fields[i]]);
+                        } catch (e) {
+                            p.error = true;
+                            node.error("Failed to parse", p);
+                        }
+                    }
                 }
-                if (node.output === "json") {
-                    try { p[node.fields[i]] = JSON.parse(p[node.fields[i]]); }
-                    catch (e) { p.error = true; node.error("Failed to parse",p); }
-                }
+                node.send(p);
             }
-            node.send(p);
-        });
-
+        })();
+    
         node.on("close", function() {
             node.connected = false;
             node.sock.close();
             node.status({});
         });
     }
-    RED.nodes.registerType("zeromq request", ZmqInOutNode);
+    
+    RED.nodes.registerType("zeromq request", ZmqInOutNode);    
 }
