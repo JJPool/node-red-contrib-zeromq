@@ -197,7 +197,7 @@ module.exports = function(RED) {
         node.send(p);
     }
     
-    async function ZmqInOutNode(n) {
+    function ZmqInOutNode(n) {
         RED.nodes.createNode(this, n);
         this.server = n.server;
         this.isserver = n.isserver;
