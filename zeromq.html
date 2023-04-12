@@ -12,6 +12,11 @@
     </div>
     <div class="form-row">
         <label>&nbsp;</label>
+        <input type="checkbox" id="node-input-resolveips" style="display:inline-block; width:auto; vertical-align:top;">
+        <label for="node-input-resolveips" style="width:70%;">Resolve IPs</label>
+    </div>
+    <div class="form-row">
+        <label>&nbsp;</label>
         <select id="node-input-intype">
             <option value="sub">Subscribe</option>
             <option value="pull">Pull</option>
@@ -61,6 +66,7 @@
             server: {value:"tcp://127.0.0.1:5555"},
             output: {value:"string"},
             isserver: {value:false},
+            resolveips: {value:false},
             intype: {value:"sub"}
         },
         inputs: 0,

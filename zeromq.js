@@ -2,21 +2,8 @@
 module.exports = function(RED) {
     "use strict";
     const zmq = require('zeromq');
-
-    async function initSocketConnection(node) {
-        try {
-            if (node.isserver === true) {
-                await node.sock.bind(node.server);
-            } else {
-                node.sock.connect(node.server);
-            }
-            node.status({ fill: "green", shape: "dot", text: "connected" });
-            node.connected = true;
-        } catch (e) {
-            node.status({ fill: "red", shape: "ring", text: e.toString() });
-            node.error(e);
-        }
-    }
+    const dns = require('dns');
+    const url = require('url');
     
     function processMessagePart(node, part, index) {
         if (index >= node.fields.length) {
@@ -42,17 +29,33 @@ module.exports = function(RED) {
         return processedPart;
     }
     
-    async function initZmqInNode(node) {
-        node.sock = new zmq[node.intype === 'sub' ? 'Subscriber' : 'Pull']();
-        node.connected = false;
+    async function initSocketConnection(node, address, port) {
+        try {
+            const sock = new zmq[node.intype === 'sub' ? 'Subscriber' : 'Pull']();
     
-        await initSocketConnection(node);
+            if (node.isserver === true) {
+                await sock.bind(node.server);
+            } else {
+                sock.connect(`tcp://${address}:${port}`);
+            }
     
-        if (node.intype === "sub") {
-            node.sock.subscribe(node.topic);
+            if (node.intype === "sub") {
+                sock.subscribe(node.topic);
+            }
+    
+            node.socks.push(sock);
+            node.status({ fill: "green", shape: "dot", text: "connected: " + node.socks.length });
+            node.connected = true;
+    
+            return sock;
+        } catch (e) {
+            node.status({ fill: "red", shape: "ring", text: e.toString() });
+            node.error(e);
         }
+    }
     
-        for await (const msg of node.sock) {
+    async function handleMessage(sock, node) {
+        for await (const msg of sock) {
             let p = {};
             let parts = [msg];
     
@@ -60,6 +63,33 @@ module.exports = function(RED) {
                 p[node.fields[i]] = processMessagePart(node, parts[i], i);
             }
             node.send(p);
+        }
+    }
+    
+    async function initZmqInNode(node) {
+        node.socks = [];
+        node.connected = false;
+    
+        const parsedUrl = url.parse(node.server);
+        const domain = parsedUrl.hostname;
+        const port = parsedUrl.port;
+    
+        if (node.resolveips) {
+            dns.resolve(domain, async (err, addresses) => {
+                if (err) {
+                    node.status({ fill: "red", shape: "ring", text: err.toString() });
+                    node.error(err);
+                    return;
+                }
+    
+                for (const address of addresses) {
+                    const sock = await initSocketConnection(node, address, port);
+                    handleMessage(sock, node);
+                }
+            });
+        } else {
+            const sock = await initSocketConnection(node, domain, port);
+            handleMessage(sock, node);
         }
     }
   
@@ -79,7 +109,9 @@ module.exports = function(RED) {
 
         node.on("close", function() {
             node.connected = false;
-            node.sock.close();
+            for (const sock of node.socks) {
+                sock.close();
+            }
             node.status({});
         });
     }
