@@ -75,15 +75,15 @@ module.exports = function(RED) {
         const port = parsedUrl.port;
     
         if (node.resolveips) {
-            dns.resolve(domain, async (err, addresses) => {
+            dns.lookup(domain, { all: true }, async (err, addresses) => {
                 if (err) {
                     node.status({ fill: "red", shape: "ring", text: err.toString() });
                     node.error(err);
                     return;
                 }
     
-                for (const address of addresses) {
-                    const sock = await initSocketConnection(node, address, port);
+                for (const addressObj of addresses) {
+                    const sock = await initSocketConnection(node, addressObj.address, port);
                     handleMessage(sock, node);
                 }
             });
@@ -109,11 +109,20 @@ module.exports = function(RED) {
 
         node.on("close", function() {
             node.connected = false;
-            for (const sock of node.socks) {
-                sock.close();
-            }
-            node.status({});
+            const socketClosePromises = node.socks.map(sock => {
+                if (node.isserver === true) {
+                    return sock.unbind(`tcp://${sock.endpoint.addr}:${sock.endpoint.port}`);
+                } else {
+                    sock.disconnect(`tcp://${sock.endpoint.addr}:${sock.endpoint.port}`);
+                    return Promise.resolve();
+                }
+            });
+        
+            Promise.all(socketClosePromises).then(() => {
+                node.status({});
+            });
         });
+        
     }
     RED.nodes.registerType("zeromq in", ZmqInNode);
 
@@ -166,7 +175,7 @@ module.exports = function(RED) {
     
         node.on("close", function() {
             node.connected = false;
-            node.sock.close();
+            node.sock.disconnect(`tcp://${sock.endpoint.addr}:${sock.endpoint.port}`);
             node.status({});
         });
     }
@@ -260,7 +269,7 @@ module.exports = function(RED) {
     
         node.on("close", function () {
             node.connected = false;
-            node.sock.close();
+            node.sock.disconnect(`tcp://${sock.endpoint.addr}:${sock.endpoint.port}`);
             node.status({});
         });
     }
