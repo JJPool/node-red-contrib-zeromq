@@ -54,7 +54,7 @@ module.exports = function(RED) {
         }
     }
     
-    async function handleMessage(sock, node) {
+    async function handleMessageSocks(sock, node) {
         for await (const msg of sock) {
             let p = {};
             let parts = [msg];
@@ -84,12 +84,12 @@ module.exports = function(RED) {
     
                 for (const addressObj of addresses) {
                     const sock = await initSocketConnection(node, addressObj.address, port);
-                    handleMessage(sock, node);
+                    handleMessageSocks(sock, node);
                 }
             });
         } else {
             const sock = await initSocketConnection(node, domain, port);
-            handleMessage(sock, node);
+            handleMessageSocks(sock, node);
         }
     }
   
