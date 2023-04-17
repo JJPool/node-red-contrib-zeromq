@@ -74,25 +74,46 @@ module.exports = function(RED) {
         const domain = parsedUrl.hostname;
         const port = parsedUrl.port;
     
+        const connectAndHandleMessageSocks = async (address) => {
+            try {
+                const sock = await initSocketConnection(node, address, port);
+                handleMessageSocks(sock, node);
+            } catch (e) {
+                node.error('Failed to connect and handle message socks: ' + e.toString());
+                setTimeout(() => reconnect(node), 5000);
+            }
+        };
+        
         if (node.resolveips) {
             dns.lookup(domain, { all: true }, async (err, addresses) => {
                 if (err) {
                     node.status({ fill: "red", shape: "ring", text: err.toString() });
                     node.error(err);
+                    setTimeout(() => reconnect(node), 5000);
                     return;
                 }
     
                 for (const addressObj of addresses) {
-                    const sock = await initSocketConnection(node, addressObj.address, port);
-                    handleMessageSocks(sock, node);
+                    await connectAndHandleMessageSocks(addressObj.address);
                 }
             });
         } else {
-            const sock = await initSocketConnection(node, domain, port);
-            handleMessageSocks(sock, node);
+            await connectAndHandleMessageSocks(domain);
         }
     }
-  
+
+    async function reconnect(node) {
+        if (!node.connected) {
+            try {
+                await initZmqInNode(node); 
+            } catch (e) {
+                node.error('Reconnection failed: ' + e.toString());
+            }
+        }
+        setTimeout(() => reconnect(node), 5000);
+    }
+   
+
     function ZmqInNode(n) {
         RED.nodes.createNode(this, n);
         this.server = n.server;
@@ -120,9 +141,9 @@ module.exports = function(RED) {
         
             Promise.all(socketClosePromises).then(() => {
                 node.status({});
+                setTimeout(() => reconnect(node), 5000);
             });
-        });
-        
+        });             
     }
     RED.nodes.registerType("zeromq in", ZmqInNode);
 
